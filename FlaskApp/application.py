@@ -47,10 +47,12 @@ def home():
     )
     photos = []
     if 'Contents' in response and response['Contents']:
+        # sort the list of photos in descending order
+        s3Contents = sorted(response['Contents'], key=lambda k: k["LastModified"], reverse=True)
         photos = [s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': config.PHOTOS_BUCKET, 'Key': content['Key']}
-            ) for content in response['Contents']]
+            ) for content in s3Contents]
 
 
     form = PhotoForm()
@@ -73,44 +75,7 @@ def home():
                 'get_object',
                 Params={'Bucket': config.PHOTOS_BUCKET, 'Key': key})
 
-    return render_template_string("""
-            {% extends "main.html" %}
-            {% block content %}
-            <h4>Upload Photo</h4>
-            <form method="POST" enctype="multipart/form-data" action="{{ url_for('home') }}">
-                {{ form.csrf_token }}
-                  <div class="control-group">
-                   <label class="control-label">Photo</label>
-                    {{ form.photo() }}
-                  </div>
-
-                    &nbsp;
-                   <div class="control-group">
-                    <div class="controls">
-                        <input class="btn btn-primary" type="submit" value="Upload">
-                    </div>
-                  </div>
-            </form>
-
-            {% if url %}
-            <hr/>
-            <h3>Uploaded!</h3>
-            <img src="{{url}}" /><br/>
-            {% for label in all_labels %}
-            <span class="label label-info">{{label}}</span>
-            {% endfor %}
-            {% endif %}
-            
-            {% if photos %}
-            <hr/>
-            <h4>Photos</h4>
-            {% for photo in photos %}
-                <img width="150" src="{{photo}}" />
-            {% endfor %}
-            {% endif %}
-
-            {% endblock %}
-                """, form=form, url=url, photos=photos, all_labels=all_labels)
+    return render_template("index.html", form=form, url=url, photos=photos, all_labels=all_labels)
 
 
 @application.route("/info")
@@ -122,13 +87,7 @@ def info():
     availability_zone = requests.get(metadata +
                                      "/latest/meta-data/placement/availability-zone").text
 
-    return render_template_string("""
-            {% extends "main.html" %}
-            {% block content %}
-            <b>instance_id</b>: {{instance_id}} <br/>
-            <b>availability_zone</b>: {{availability_zone}} <br/>
-            <b>sys.version</b>: {{sys_version}} <br/>
-            {% endblock %}""",
+    return render_template("info.html",
                                   instance_id=instance_id,
                                   availability_zone=availability_zone,
                                   sys_version=sys.version)
