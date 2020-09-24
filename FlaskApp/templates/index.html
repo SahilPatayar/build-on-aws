@@ -29,8 +29,22 @@
 <hr />
 <h4>Photos</h4>
 {% for photo in photos %}
-<img width="150" src="{{photo}}" />
+<table class="table table-bordered">
+    <tr>
+        <td rowspan="4" class="col-md-2 text-center"><img width="150" src="{{photo.signed_url}}" /> </td>
+    </tr>
+    <tr>
+        <th scope="row" class="col-md-2">Labels</th>
+        <td>{{photo.labels}}</td>
+    </tr>
+    <tr>
+        <th scope="row" class="col-md-2">Created</th>
+        <td>{{photo.created_datetime}} UTC</td>
+    </tr>
+</table>
+
 {% endfor %}
 {% endif %}
+
 
 {% endblock %}
