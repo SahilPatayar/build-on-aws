@@ -67,15 +67,7 @@ def user_loader(session_token):
 @application.route("/")
 def home():
     """Homepage route"""
-    return render_template_string("""
-        {% extends "main.html" %}
-        {% block content %}
-        {% if current_user.is_authenticated %}
-        Click <em>my photos</em> to access your photos.
-        {% else %}
-        Click <em>login in / sign up<em> to access this site.
-        {% endif %}
-        {% endblock %}""")
+    return render_template("home.html")
 
 @application.route("/myphotos", methods=('GET', 'POST'))
 @flask_login.login_required
