@@ -15,7 +15,7 @@ from datetime import datetime
 import requests
 from requests.auth import HTTPBasicAuth
 import boto3
-from flask import Flask, render_template, render_template_string, session, redirect, request, url_for
+from flask import Flask, render_template_string, session, redirect, request, url_for
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileRequired
 from wtforms import TextAreaField
@@ -24,7 +24,9 @@ from jose import jwt
 from aws_xray_sdk.core import xray_recorder, patch_all
 from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
 
-from utils import config, util, rekognitionUtil, database, s3Util
+import config
+import util
+import database
 
 application = Flask(__name__)
 application.secret_key = config.FLASK_SECRET
@@ -75,21 +77,33 @@ def user_loader(session_token):
 @application.route("/")
 def home():
     """Homepage route"""
-    return render_template("home.html")
+    return render_template_string("""
+        {% extends "main.html" %}
+        {% block content %}
+        {% if current_user.is_authenticated %}
+        Click <em>my photos</em> to access your photos.
+        {% else %}
+        Click <em>login in / sign up<em> to access this site.
+        {% endif %}
+        {% endblock %}""")
 
 @application.route("/myphotos", methods=('GET', 'POST'))
 @flask_login.login_required
 def myphotos():
-    """login required my photos route"""
-    all_labels = ["Labels generating asynchronously"]
-    prefix = "photos/"
+    "login required my photos route"
+    all_labels = ["No labels yet"]
 
     #####
-    # Getting list of photos from database
+    # rds exercise get list of images from database
+    # now we have a user id from cognito
     #####
+    s3_client = boto3.client('s3')
     photos = database.list_photos(flask_login.current_user.id)
     for photo in photos:
-        photo["signed_url"] = s3Util.generate_presigned_urls(config.PHOTOS_BUCKET, photo["object_key"])
+        photo["signed_url"] = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': config.PHOTOS_BUCKET, 'Key': photo["object_key"]}
+        )
 
     form = PhotoForm()
     url = None
@@ -99,21 +113,85 @@ def myphotos():
             #######
             # s3 excercise - save the file to a bucket
             #######
+            prefix = "photos/"
             key = prefix + util.random_hex_bytes(8) + '.png'
-            s3Util.put_object(config.PHOTOS_BUCKET, key, image_bytes, "image/png")
+            s3_client.put_object(
+                Bucket=config.PHOTOS_BUCKET,
+                Key=key,
+                Body=image_bytes,
+                ContentType='image/png'
+            )
+            # http://boto3.readthedocs.io/en/latest/guide/s3.html#generating-presigned-urls
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': config.PHOTOS_BUCKET, 'Key': key})
 
-            # create labels from amazon rekoginition
-            # Code moved to Lambda function
-            #all_labels = rekognitionUtil.detect_labels(config.PHOTOS_BUCKET, key)
+            #######
+            # rekcognition exercise - this code has moved to lambda
+            #######
+            all_labels = ["Processing labels asyncronously"]
 
-            # Generate pre signed url for newly uploaded photo
-            url = s3Util.generate_presigned_urls(config.PHOTOS_BUCKET, key)
+            #######
+            # rds excercise
+            # added user id and description to the database
+            #######
+            labels_comma_separated = ", ".join(all_labels)
+            database.add_photo(key, labels_comma_separated,
+                               form.description.data, flask_login.current_user.id)
+            form.description.data = ''
 
-            # save the image labels to database
-            database.add_photo(key, ", ".join(all_labels), form.description.data, flask_login.current_user.id)
+    return render_template_string("""
+            {% extends "main.html" %}
+            {% block content %}
+            <h4>Upload Photo</h4>
+            <form method="POST" enctype="multipart/form-data" action="{{ url_for('myphotos') }}">
+                {{ form.csrf_token }}
+                  <div class="control-group">
+                   <label class="control-label">Photo</label>
+                    {{ form.photo() }}
+                  </div>
+                  <div class="control-group">
+                    <label class="control-label">Description</label>
+                    <div class="controls">
+                    {{ form.description(class="form-control") }}
+                    </div>
+                  </div>
+                    &nbsp;
+                   <div class="control-group">
+                    <div class="controls">
+                        <input class="btn btn-primary" type="submit" value="Upload">
+                    </div>
+                  </div>
+            </form>
 
-    return render_template("index.html", form=form, url=url, photos=photos, all_labels=all_labels)
+            {% if url %}
+            <hr/>
+            <h3>Uploaded!</h3>
+            <img src="{{url}}" /><br/>
+            {% for label in all_labels %}
+            <span class="label label-info">{{label}}</span>
+            {% endfor %}
+            {% endif %}
+            
+            {% if photos %}
+            <hr/>
+            <h4>Photos</h4>
+            {% for photo in photos %}
+                <table class="table table-bordered">
+                <tr> <td rowspan="4" class="col-md-2 text-center"><img width="150" src="{{photo.signed_url}}" />
+                    <a href="{{ url_for('myphotos_delete', object_key=photo.object_key) }}"><span class="glyphicon glyphicon-remove" aria-hidden="true"></span> delete</a>
+                </td></tr>
+                <tr> <th scope="row" class="col-md-2">Description</th> <td>{{photo.description}}</td> </tr>
+                <tr> <th scope="row" class="col-md-2">Labels</th> <td>{{photo.labels}}</td> </tr>
+                <tr> <th scope="row" class="col-md-2">Created</th> <td>{{photo.created_datetime}} UTC</td> </tr>
+                </table>
 
+            {% endfor %}
+            {% endif %}
+
+
+            {% endblock %}
+                """, form=form, url=url, photos=photos, all_labels=all_labels)
 
 @application.route("/myphotos/delete/<path:object_key>")
 @flask_login.login_required
@@ -121,7 +199,6 @@ def myphotos_delete(object_key):
     "delete photo route"
     database.delete_photo(object_key, flask_login.current_user.id)
     return redirect(url_for("myphotos"))
-
 
 @application.route("/info")
 def info():
@@ -132,11 +209,16 @@ def info():
     availability_zone = requests.get(metadata +
                                      "/latest/meta-data/placement/availability-zone").text
 
-    return render_template("info.html",
+    return render_template_string("""
+            {% extends "main.html" %}
+            {% block content %}
+            <b>instance_id</b>: {{instance_id}} <br/>
+            <b>availability_zone</b>: {{availability_zone}} <br/>
+            <b>sys.version</b>: {{sys_version}} <br/>
+            {% endblock %}""",
                                   instance_id=instance_id,
                                   availability_zone=availability_zone,
                                   sys_version=sys.version)
-
 
 @application.route("/login")
 def login():
@@ -185,7 +267,7 @@ def callback():
 
         user = User()
         user.id = id_token["cognito:username"]
-        session['nickname'] = user.id
+        session['nickname'] = id_token["nickname"]
         session['expires'] = id_token["exp"]
         session['refresh_token'] = response.json()["refresh_token"]
         flask_login.login_user(user, remember=True)
@@ -218,6 +300,6 @@ def verify(token, access_token=None):
 if __name__ == "__main__":
     # http://flask.pocoo.org/docs/0.12/errorhandling/#working-with-debuggers
     # https://docs.aws.amazon.com/cloud9/latest/user-guide/app-preview.html
-    use_c9_debugger = True
+    use_c9_debugger = False
     application.run(use_debugger=not use_c9_debugger, debug=True,
                     use_reloader=not use_c9_debugger, host='0.0.0.0', port=8080)
