@@ -10,7 +10,7 @@
 # specific language governing permissions and limitations under the License.
 "Database layer"
 import mysql.connector
-import config
+from utils import config
 
 def list_photos(cognito_username):
     "Select all the photos from the database"

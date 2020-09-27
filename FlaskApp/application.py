@@ -15,12 +15,14 @@ from datetime import datetime
 import requests
 from requests.auth import HTTPBasicAuth
 import boto3
-from flask import Flask, render_template, session, redirect, request, url_for
+from flask import Flask, render_template, render_template_string, session, redirect, request, url_for
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileRequired
 from wtforms import TextAreaField
 import flask_login
 from jose import jwt
+from aws_xray_sdk.core import xray_recorder, patch_all
+from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
 
 from utils import config, util, rekognitionUtil, database, s3Util
 
@@ -35,6 +37,12 @@ login_manager.init_app(application)
 JWKS_URL = ("https://cognito-idp.%s.amazonaws.com/%s/.well-known/jwks.json"
             % (config.AWS_REGION, config.COGNITO_POOL_ID))
 JWKS = requests.get(JWKS_URL).json()["keys"]
+
+### x-ray set up
+plugins = ('EC2Plugin',)
+xray_recorder.configure(service='MyApplication', plugins=plugins)
+XRayMiddleware(application, xray_recorder)
+patch_all()
 
 ### FlaskForm set up
 class PhotoForm(FlaskForm):
@@ -79,7 +87,7 @@ def myphotos():
     #####
     # Getting list of photos from database
     #####
-    photos = database.list_photos()
+    photos = database.list_photos(flask_login.current_user.id)
     for photo in photos:
         photo["signed_url"] = s3Util.generate_presigned_urls(config.PHOTOS_BUCKET, photo["object_key"])
 
@@ -101,7 +109,7 @@ def myphotos():
             url = s3Util.generate_presigned_urls(config.PHOTOS_BUCKET, key)
 
             # save the image labels to database
-            database.add_photo(key, ", ".join(all_labels))
+            database.add_photo(key, ", ".join(all_labels), form.description.data, flask_login.current_user.id)
 
     return render_template("index.html", form=form, url=url, photos=photos, all_labels=all_labels)
 
@@ -176,7 +184,7 @@ def callback():
 
         user = User()
         user.id = id_token["cognito:username"]
-        session['nickname'] = id_token["nickname"]
+        session['nickname'] = user.id
         session['expires'] = id_token["exp"]
         session['refresh_token'] = response.json()["refresh_token"]
         flask_login.login_user(user, remember=True)
@@ -209,6 +217,6 @@ def verify(token, access_token=None):
 if __name__ == "__main__":
     # http://flask.pocoo.org/docs/0.12/errorhandling/#working-with-debuggers
     # https://docs.aws.amazon.com/cloud9/latest/user-guide/app-preview.html
-    use_c9_debugger = False
+    use_c9_debugger = True
     application.run(use_debugger=not use_c9_debugger, debug=True,
                     use_reloader=not use_c9_debugger, host='0.0.0.0', port=8080)

@@ -3,9 +3,9 @@
 {% block content %}
 
 {% if current_user.is_authenticated %}
-    Click <em>my photos</em> to access your photos.
+    Click <em><a href="{{ url_for('myphotos') }}">my photos</a></em> to access your photos.
 {% else %}
-    Click <em>login in / sign up<em> to access this site.        
+    Click <em><a href="{{ url_for('login') }}">login in / sign up</a><em> to access this site.        
 {% endif %}
 
 {% endblock %}

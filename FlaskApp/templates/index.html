@@ -1,7 +1,7 @@
 {% extends "main.html" %}
 {% block content %}
 <h4>Upload Photo</h4>
-<form method="POST" enctype="multipart/form-data" action="{{ url_for('home') }}">
+<form method="POST" enctype="multipart/form-data" action="{{ url_for('myphotos') }}">
     {{ form.csrf_token }}
     <div class="control-group">
         <label class="control-label">Photo</label>
